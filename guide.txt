@@ -1,0 +1,32 @@
+Go Gin + GORM + go-migrate
+-   Create project
+    +   go mod init github.com/template/go-backend-gin-orm
+    +   go get -u github.com/spf13/viper
+    +   go get -u gorm.io/gorm
+    +   go get -u gorm.io/driver/postgres
+    +   go get -u github.com/gin-gonic/gin
+    +   go get github.com/golang-jwt/jwt/v5
+    +   go get -u github.com/swaggo/gin-swagger
+    +   go get -u github.com/swaggo/files
+
+-   Install tool
+    +   go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+    +   go install github.com/swaggo/swag/cmd/swag@latest
+
+-   Run
+    +   go run cmd/main.go
+    +   nodemon --watch './**/*.go' --signal SIGTERM --exec 'go' run cmd/main.go
+
+-   Golang-migrate
+    +   go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+    +   migrate create -ext sql -dir migrations -seq create_users_table
+    +   Run the migration : migrate -database "postgres://user:password@localhost:5432/dbname?sslmode=disable" -path migrations up
+    +   Rollback : migrate -database "postgres://user:password@localhost:5432/dbname?sslmode=disable" -path migrations down
+
+-   Create swagger
+    +   swag init -g cmd/main.go
+    +   Add some comment Decorator
+    +   go to http://localhost:5050/swagger/index.html
+
+
+Note : Does not pass db to repo because the transaction need db to pass into
