@@ -13,6 +13,8 @@ data "external_schema" "gorm" {
 env "gorm" {
   src = data.external_schema.gorm.url
   dev = "postgresql://postgres:Phongsql123@localhost:5432/golang_example?sslmode=disable"  
+  url = "postgresql://postgres:Phongsql123@localhost:5432/golang_example?sslmode=disable"
+
   migration {
     dir = "file://migrations"    
   }

@@ -23,7 +23,7 @@ func NewServer() *Server {
 	// dbInstance.MigrateDatabase()
 
 	app := gin.Default()
-	app.Static("/upload", "./uploads")
+	app.Static("/uploads", "./uploads")
 
 	// Initialize Repositories
 	// userRepo := repositories.NewUserRepository(dbInstance.DB)
