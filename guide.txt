@@ -30,3 +30,6 @@ Go Gin + GORM + go-migrate
 
 
 Note : Does not pass db to repo because the transaction need db to pass into
+
+- atlas
+    +   atlas migrate diff --env gorm

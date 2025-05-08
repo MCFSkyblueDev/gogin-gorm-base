@@ -20,7 +20,7 @@ type Server struct {
 
 func NewServer() *Server {
 	dbInstance := NewPostgresDatabase()
-	dbInstance.MigrateDatabase()
+	// dbInstance.MigrateDatabase()
 
 	app := gin.Default()
 	app.Static("/upload", "./uploads")
