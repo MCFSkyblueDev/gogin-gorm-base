@@ -226,44 +226,333 @@ migrate -database $DATABASE_URL -path migrations version
 migrate -database $DATABASE_URL -path migrations force 1
 ```
 
-### Using Atlas (Alternative)
+### Using Atlas (Recommend)
+
+Atlas is a modern schema migration tool that can automatically generate migrations from GORM models.
+
+#### Install Atlas Provider for GORM
+
+```bash
+# Install Atlas
+go install ariga.io/atlas/cmd/atlas@latest
+
+# The atlas-provider-gorm will be used by Atlas automatically
+```
 
 #### atlas.hcl Configuration
 
+Create `atlas.hcl` in your project root:
+
 ```hcl
+# Load GORM schema using external provider
+data "external_schema" "gorm" {
+  program = [
+    "go",
+    "run",
+    "-mod=mod",
+    "ariga.io/atlas-provider-gorm",
+    "load",
+    "--path", "./internal/models",      # Path to your GORM models
+    "--dialect", "postgres",             # Database dialect
+  ]
+}
+
+# Environment configuration for Atlas
 env "gorm" {
-  src = "ent://internal/models"
-  
-  dev = "postgres://postgres:postgres@localhost:5432/myapp_dev?sslmode=disable"
-  
-  url = "postgres://postgres:postgres@localhost:5432/myapp_db?sslmode=disable"
-  
+  # Source schema from GORM models
+  src = data.external_schema.gorm.url
+
+  # DEV DATABASE - Must be CLEAN - Only used for diff/comparison
+  # Atlas uses this to calculate differences between your models and actual schema
+  dev = "postgresql://postgres:postgres@localhost:5432/myapp_dev?sslmode=disable"
+
+  # PRODUCTION DATABASE - Your actual database where migrations will be applied
+  url = "postgresql://postgres:postgres@localhost:5432/myapp_db?sslmode=disable"
+
+  # Migration directory
   migration {
-    dir = "file://migrations/atlas"
+    dir = "file://migrations"
   }
-  
+
+  # Format settings for generated SQL
   format {
     migrate {
-      diff = "{{ sql . \"  \" }}"
+      diff = "{{ sql . \"  \" }}"  # Indent with 2 spaces
     }
   }
 }
 ```
 
-#### Atlas Commands
+#### Understanding Atlas Databases
+
+**DEV Database (`dev`):**
+- Must be a **clean, empty database**
+- Used only for schema comparison
+- Atlas uses it as a temporary workspace
+- Never manually modify this database
+- Can be dropped and recreated anytime
+
+**Production Database (`url`):**
+- Your actual application database
+- Where migrations are applied
+- Contains real data
+- Should be backed up regularly
+
+#### Atlas Workflow
 
 ```bash
-# Generate migration from GORM models
-atlas migrate diff --env gorm
+# 1. Ensure dev database is clean (optional but recommended)
+psql -U postgres -c "DROP DATABASE IF EXISTS myapp_dev;"
+psql -U postgres -c "CREATE DATABASE myapp_dev;"
 
-# Apply migrations
+# 2. Generate migration from GORM models
+# This compares your GORM models with the current production schema
+atlas migrate diff migration_name --env gorm
+
+# Example outputs:
+# - migrations/20240115120000_migration_name.sql
+
+# 3. Review generated migration
+cat migrations/20240115120000_migration_name.sql
+
+# 4. Apply migrations to production
 atlas migrate apply --env gorm
 
-# Validate migrations
+# 5. Apply specific number of migrations
+atlas migrate apply 1 --env gorm
+
+# 6. Validate migrations
 atlas migrate validate --env gorm
 
-# Check migration status
+# 7. Check migration status
 atlas migrate status --env gorm
+
+# 8. View migration history
+atlas migrate status --env gorm --verbose
+
+# 9. Lint migrations (check for issues)
+atlas migrate lint --env gorm
+
+# 10. Generate SQL for pending migrations (dry run)
+atlas migrate apply --env gorm --dry-run
+```
+
+#### Example: Complete Migration Flow
+
+**Step 1: Create GORM Models**
+
+```go
+// internal/models/product.go
+package models
+
+import (
+    "gorm.io/gorm"
+    "time"
+)
+
+type Product struct {
+    ID          uint           `gorm:"primaryKey" json:"id"`
+    Name        string         `gorm:"not null;index" json:"name"`
+    Description string         `json:"description"`
+    Price       float64        `gorm:"not null" json:"price"`
+    Stock       int            `gorm:"default:0" json:"stock"`
+    CategoryID  uint           `gorm:"not null" json:"category_id"`
+    Category    Category       `gorm:"foreignKey:CategoryID" json:"category"`
+    CreatedAt   time.Time      `json:"created_at"`
+    UpdatedAt   time.Time      `json:"updated_at"`
+    DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+type Category struct {
+    ID        uint           `gorm:"primaryKey" json:"id"`
+    Name      string         `gorm:"uniqueIndex;not null" json:"name"`
+    Products  []Product      `gorm:"foreignKey:CategoryID" json:"products,omitempty"`
+    CreatedAt time.Time      `json:"created_at"`
+    UpdatedAt time.Time      `json:"updated_at"`
+    DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
+}
+```
+
+**Step 2: Generate Migration**
+
+```bash
+# Generate migration from models
+atlas migrate diff create_products_and_categories --env gorm
+
+# This creates: migrations/20240115120000_create_products_and_categories.sql
+```
+
+**Step 3: Generated SQL Example**
+
+```sql
+-- migrations/20240115120000_create_products_and_categories.sql
+-- Create "categories" table
+CREATE TABLE "categories" (
+  "id" bigserial NOT NULL,
+  "name" text NOT NULL,
+  "created_at" timestamptz NULL,
+  "updated_at" timestamptz NULL,
+  "deleted_at" timestamptz NULL,
+  PRIMARY KEY ("id")
+);
+
+-- Create index "idx_categories_deleted_at" to table: "categories"
+CREATE INDEX "idx_categories_deleted_at" ON "categories" ("deleted_at");
+
+-- Create index "idx_categories_name" to table: "categories"
+CREATE UNIQUE INDEX "idx_categories_name" ON "categories" ("name");
+
+-- Create "products" table
+CREATE TABLE "products" (
+  "id" bigserial NOT NULL,
+  "name" text NOT NULL,
+  "description" text NULL,
+  "price" numeric NOT NULL,
+  "stock" bigint NULL DEFAULT 0,
+  "category_id" bigint NOT NULL,
+  "created_at" timestamptz NULL,
+  "updated_at" timestamptz NULL,
+  "deleted_at" timestamptz NULL,
+  PRIMARY KEY ("id"),
+  CONSTRAINT "fk_products_category" FOREIGN KEY ("category_id") REFERENCES "categories" ("id") ON UPDATE NO ACTION ON DELETE NO ACTION
+);
+
+-- Create index "idx_products_deleted_at" to table: "products"
+CREATE INDEX "idx_products_deleted_at" ON "products" ("deleted_at");
+
+-- Create index "idx_products_name" to table: "products"
+CREATE INDEX "idx_products_name" ON "products" ("name");
+```
+
+**Step 4: Apply Migration**
+
+```bash
+# Apply to production
+atlas migrate apply --env gorm
+
+# Output:
+# Migrating to version 20240115120000 (1 migrations in total):
+#   -- migrating version 20240115120000
+#     -> CREATE TABLE "categories" ...
+#     -> CREATE TABLE "products" ...
+#   -- ok (25.5ms)
+```
+
+#### Atlas vs golang-migrate Comparison
+
+| Feature | Atlas | golang-migrate |
+|---------|-------|----------------|
+| **Auto-generate from models** | ✅ Yes | ❌ No (manual SQL) |
+| **Schema awareness** | ✅ Yes | ❌ No |
+| **Diff calculation** | ✅ Automatic | ❌ Manual |
+| **Rollback** | ✅ Built-in | ✅ Down migrations |
+| **Migration validation** | ✅ Advanced | ⚠️ Basic |
+| **Learning curve** | ⚠️ Medium | ✅ Simple |
+| **Flexibility** | ⚠️ Less (auto-generated) | ✅ Full control |
+
+#### Common Atlas Commands Reference
+
+```bash
+# Schema inspection
+atlas schema inspect --env gorm --url "postgres://..."
+
+# Schema comparison
+atlas schema diff \
+  --from "postgres://user:pass@localhost/db1" \
+  --to "postgres://user:pass@localhost/db2"
+
+# Apply schema directly (without migrations)
+atlas schema apply --env gorm --auto-approve
+
+# Create a new migration
+atlas migrate diff add_email_to_users --env gorm
+
+# Apply all pending migrations
+atlas migrate apply --env gorm
+
+# Apply specific version
+atlas migrate apply --env gorm --to-version 20240115120000
+
+# Rollback last migration
+atlas migrate down --env gorm
+
+# Check current database version
+atlas migrate status --env gorm
+
+# Validate migration files
+atlas migrate validate --env gorm
+
+# Lint migrations for potential issues
+atlas migrate lint --env gorm
+
+# Hash migration files (for integrity)
+atlas migrate hash --env gorm
+```
+
+#### Best Practices for Atlas
+
+1. **Always Keep Dev DB Clean**
+   ```bash
+   # Reset dev database before generating migrations
+   psql -U postgres -c "DROP DATABASE myapp_dev;"
+   psql -U postgres -c "CREATE DATABASE myapp_dev;"
+   ```
+
+2. **Review Generated Migrations**
+   - Always review SQL before applying
+   - Atlas generates safe migrations, but verify logic
+
+3. **Use Version Control**
+   ```bash
+   # Commit migration files
+   git add migrations/
+   git commit -m "feat: add products and categories tables"
+   ```
+
+4. **Test Migrations**
+   ```bash
+   # Test on staging first
+   atlas migrate apply --env staging
+   
+   # Then production
+   atlas migrate apply --env gorm
+   ```
+
+5. **Backup Before Migration**
+   ```bash
+   # PostgreSQL backup
+   pg_dump -U postgres myapp_db > backup_$(date +%Y%m%d_%H%M%S).sql
+   
+   # Apply migration
+   atlas migrate apply --env gorm
+   ```
+
+#### Troubleshooting Atlas
+
+**Problem: Dev database not clean**
+```bash
+Error: dev database is not clean
+
+Solution:
+psql -U postgres -c "DROP DATABASE myapp_dev; CREATE DATABASE myapp_dev;"
+```
+
+**Problem: Migration conflict**
+```bash
+Error: migration version conflict
+
+Solution:
+atlas migrate hash --env gorm  # Rehash migrations
+```
+
+**Problem: Cannot connect to database**
+```bash
+Error: failed to connect to database
+
+Solution:
+# Check connection string in atlas.hcl
+# Verify database is running
+psql -U postgres -d myapp_db -c "SELECT 1"
 ```
 
 ## 📝 Models
