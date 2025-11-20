@@ -301,40 +301,56 @@ env "gorm" {
 #### Atlas Workflow
 
 ```bash
-# 1. Ensure dev database is clean (optional but recommended)
-psql -U postgres -c "DROP DATABASE IF EXISTS myapp_dev;"
+# 1. Ensure the dev database is completely clean (critical for accurate diff)
+psql -U postgres -c "DROP DATABASE IF EXISTS myapp_dev WITH (FORCE);"
 psql -U postgres -c "CREATE DATABASE myapp_dev;"
 
-# 2. Generate migration from GORM models
-# This compares your GORM models with the current production schema
-atlas migrate diff migration_name --env gorm
+# 2. Generate a new migration from GORM model changes
+atlas migrate diff add_user_profile --env gorm
+# → Creates: migrations/20251121103022_add_user_profile.sql
 
-# Example outputs:
-# - migrations/20240115120000_migration_name.sql
+# 3. Review & edit the generated migration (add Down section if needed)
+code migrations/20251121103022_add_user_profile.sql   # or vim, nano, etc.
 
-# 3. Review generated migration
-cat migrations/20240115120000_migration_name.sql
+# 4. RECALCULATE CHECKSUM AFTER EDITING THE FILE (MANDATORY!)
+atlas migrate hash --env gorm
 
-# 4. Apply migrations to production
+# 5. Apply all pending migrations to the real database
 atlas migrate apply --env gorm
 
-# 5. Apply specific number of migrations
-atlas migrate apply 1 --env gorm
+# 6. Apply only a specific number of migrations
+atlas migrate apply 1 --env gorm   # apply only the latest one
+atlas migrate apply 3 --env gorm   # apply the latest 3
 
-# 6. Validate migrations
-atlas migrate validate --env gorm
-
-# 7. Check migration status
+# 7. Check current migration status
 atlas migrate status --env gorm
 
-# 8. View migration history
+# 8. Show detailed migration history
 atlas migrate status --env gorm --verbose
 
-# 9. Lint migrations (check for issues)
+# 9. Lint – detect dangerous migrations (data loss, breaking changes…)
 atlas migrate lint --env gorm
+atlas migrate lint --env gorm --latest 3   # lint only the last 3 migrations
 
-# 10. Generate SQL for pending migrations (dry run)
+# 10. Preview SQL that will be executed (dry-run) – 100% safe
 atlas migrate apply --env gorm --dry-run
+
+# 11. Revert / Downgrade (Atlas’s superpower)
+atlas migrate set --env gorm -1          # rollback last migration (most used)
+atlas migrate set --env gorm -3          # rollback last 3 migrations
+atlas migrate set --env gorm 20251121100000   # go exactly to this version
+atlas migrate set --env gorm 0           # wipe everything (dev/staging only)
+
+# 12. Validate entire migration directory (checksum + syntax)
+atlas migrate validate --env gorm
+
+# 13. Create an empty migration for manual SQL / data migration
+atlas migrate new seed_initial_data
+
+# 14. Push migrations to Atlas Cloud (perfect for CI/CD + approval flow)
+atlas migrate push my-project-name --env gorm
+# Then apply from Cloud without cloning repo:
+atlas migrate apply --url atlas://my-project-name
 ```
 
 #### Example: Complete Migration Flow
